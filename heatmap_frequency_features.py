@@ -116,7 +116,8 @@ def compute_global_bounds(data, margin=0.05):
                     mask_r = (df["RTotalForce"] > 0) & df["RCoP_X"].notna()
                     if mask_r.any():
                         all_x.append(df.loc[mask_r, "RCoP_X"].values)
-                        all_y.append(df.loc[mask_r, "RCoP_Y"].values)
+                        # Apply the -1 multiplier here so the global bounds account for the flip
+                        all_y.append(df.loc[mask_r, "RCoP_Y"].values * -1)
                 except KeyError:
                     continue
 
@@ -142,19 +143,32 @@ def generate_sample_heatmap(df, xedges, yedges, grid, sigma):
         if mask_l.any():
             x_l = df.loc[mask_l, "LCoP_X"].values
             y_l = df.loc[mask_l, "LCoP_Y"].values
-            H_l, _, _ = np.histogram2d(x_l, y_l, bins=[xedges, yedges])
-            H_l = np.clip(H_l.T, 0, np.percentile(H_l[H_l > 0], 99.99))
-            density_l = ndimage.gaussian_filter(H_l, sigma=sigma) / len(x_l)
+            # x_l (Anterior-Posterior) goes to bins[0] (Image Rows/Vertical)
+            # y_l (Medial-Lateral) goes to bins[1] (Image Cols/Horizontal)
+            H_l, _, _ = np.histogram2d(
+                x_l,
+                y_l,
+                bins=[xedges, yedges],
+                weights=df.loc[mask_l, "LTotalForce"].values,
+            )
+            H_l = np.clip(H_l, 0, np.percentile(H_l[H_l > 0], 99.99))
+            density_l = ndimage.gaussian_filter(H_l, sigma=sigma)
             density_map[0] = density_l.astype(np.float32)
 
         # Right foot (Channel 1)
         mask_r = (df["RTotalForce"] > 0) & df["RCoP_X"].notna()
         if mask_r.any():
             x_r = df.loc[mask_r, "RCoP_X"].values
-            y_r = df.loc[mask_r, "RCoP_Y"].values
-            H_r, _, _ = np.histogram2d(x_r, y_r, bins=[xedges, yedges])
-            H_r = np.clip(H_r.T, 0, np.percentile(H_r[H_r > 0], 99.99))
-            density_r = ndimage.gaussian_filter(H_r, sigma=sigma) / len(x_r)
+            y_r = df.loc[mask_r, "RCoP_Y"].values * -1  # Keep the geometric mirroring
+
+            H_r, _, _ = np.histogram2d(
+                x_r,
+                y_r,
+                bins=[xedges, yedges],
+                weights=df.loc[mask_r, "RTotalForce"].values,  # USE weights
+            )
+            H_r = np.clip(H_r, 0, np.percentile(H_r[H_r > 0], 99.99))
+            density_r = ndimage.gaussian_filter(H_r, sigma=sigma)
             density_map[1] = density_r.astype(np.float32)
     except KeyError:
         pass  # Return empty zeros map if columns are missing
@@ -357,8 +371,8 @@ if __name__ == "__main__":
     # 1. Generate Heatmaps
     # -----------------------------------------------------
     print("\n--- Starting Heatmap Generation ---")
-    grid_size = 64
-    sigma = 1.5
+    grid_size = 128
+    sigma = 3.0
     X_heatmaps, y_labels, heatmap_metadata = build_heatmap_dataset(
         data, grid=grid_size, sigma=sigma
     )
