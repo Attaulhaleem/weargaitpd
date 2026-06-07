@@ -9,3 +9,10 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Data
+*.csv
+*.npz
+
+# Mac OS
+.DS_Store
